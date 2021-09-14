@@ -1,0 +1,25 @@
+{
+  "collection": "@nestjs/schematics",
+  "monorepo": true,
+  "root": "apps",
+  "projects": {
+    "table-export": {
+      "type": "application",
+      "root": "apps/table-export",
+      "entryFile": "src/main",
+      "sourceRoot": "apps/table-export",
+      "compilerOptions": {
+        "tsConfigPath": "apps/table-export/tsconfig.app.json"
+      }
+    },
+    "analytics": {
+      "type": "application",
+      "root": "apps/analytics",
+      "entryFile": "src/main",
+      "sourceRoot": "apps/analytics",
+      "compilerOptions": {
+        "tsConfigPath": "apps/analytics/tsconfig.app.json"
+      }
+    }
+  }
+}

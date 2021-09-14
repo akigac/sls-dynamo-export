@@ -1,0 +1,164 @@
+service:
+  name: serverless-example
+
+plugins:
+  - serverless-offline
+
+provider:
+  name: aws
+  region:
+  runtime: nodejs14.x
+  apiGateway:
+    apiKeys:
+      - free:
+          - myFreeKey
+          - ${opt:stage}-myFreeKey
+    usagePlan:
+      - free:
+          quota:
+            limit: 5000
+            offset: 2
+            period: MONTH
+          throttle:
+            burstLimit: 200
+            rateLimit: 100
+  logs:
+    restApi: false
+  environment:
+    DYNAMO_ANALYTICS_BUCKET: ${env:DYNAMO_ANALYTICS_BUCKET}
+    ACCOUNT_ID: ${env:ACCOUNT_ID}
+  iamRoleStatements:
+    - Effect: 'Allow'
+      Action:
+        - "dynamodb:ListTables"
+        - "dynamodb:ExportTableToPointInTime"
+        - 'dynamodb:ListExports'
+        - 'dynamodb:UpdateContinuousBackups'
+        - 'dynamodb:ExportTableToPointInTime'
+      Resource: '*'
+    - Effect: 'Allow'
+      Action:
+        - 's3:GetObject'
+        - 's3:CopyObject'
+        - 's3:DeleteObject'
+        - 's3:AbortMultipartUpload'
+        - 's3:PutObject'
+        - 's3:PutObjectAcl'
+      Resource:
+        - "arn:aws:s3:::${env:DYNAMO_ANALYTICS_BUCKET}/*"
+    - Effect: 'Allow'
+      Action:
+        - 's3:ListBucket'
+      Resource:
+        - "arn:aws:s3:::${env:DYNAMO_ANALYTICS_BUCKET}"
+
+package:
+  patterns:
+    - '!node_modules/**'
+    - '!layer/**'
+    - '!src/**'
+    - '!test/**'
+
+layers:
+  node:
+    path: layer/modules/node
+    name: ${self:service.name}-${sls:stage}-nodeLayer
+    description: Description of what the lambda layer does 
+    compatibleRuntimes:
+      - nodejs14.x
+    package:
+      patterns:
+        - node_modules/**
+    
+functions:
+  api-export:
+    handler: dist/table-export/src/index.handler
+    events:
+      - http:
+          method: ANY
+          path: 'app-1/{proxy+}'
+          private: true
+      - http:
+          method: ANY
+          path: 'app-1'
+    layers:
+      - { Ref: NodeLambdaLayer }
+  api-analytics:
+    handler: dist/analytics/src/index.handler
+    events:
+      - http:
+          method: ANY
+          path: 'app-2/{proxy+}'
+      - http:
+          method: ANY
+          path: 'app-2'
+    layers:
+      - { Ref: NodeLambdaLayer }
+  dynamoExport:
+    handler: dist/table-export/src/standalone/main.dynamoExportHndler
+    layers:
+      - { Ref: NodeLambdaLayer }
+    events:
+      - s3:
+          bucket: ${env:DYNAMO_ANALYTICS_BUCKET}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: exports/
+            - suffix: .json.gz
+
+resources:
+  Resources:
+    Analytics:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: analytics
+        Tags:
+          - Key: name
+            Value: analytics
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PROVISIONED
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+    
+    GlueDatabase:
+      Type: AWS::Glue::Database
+      Properties:
+        CatalogId: !Ref AWS::AccountId  
+        DatabaseInput:
+          Name: !Sub glue-database-${sls:stage}
+    GlueTable:
+      Type: AWS::Glue::Table
+      Properties:
+        CatalogId: !Ref AWS::AccountId
+        DatabaseName: !Ref GlueDatabase
+        TableInput: 
+          Name: !Sub glue-table-${sls:stage}
+          TableType: EXTERNAL_TABLE
+          StorageDescriptor:
+            Location: !Sub s3://${env:DYNAMO_ANALYTICS_BUCKET}/athena/data
+            InputFormat: org.apache.hadoop.mapred.TextInputFormat
+            OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+            Parameters:
+              EXTERNAL: true
+            Columns:
+              - Comment: "id test"
+                Name: 'Item'
+                Type: 'struct<id:struct<S:string>,name:struct<S:string>>'
+            SerdeInfo:
+              Parameters:
+                paths: "Item"
+                # field.delim: ""
+                # serialization.format: ","
+              SerializationLibrary: org.apache.hive.hcatalog.data.JsonSerDe
+
+
+
+
+      
+
